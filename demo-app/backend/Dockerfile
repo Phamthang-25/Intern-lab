@@ -6,7 +6,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Cài đặt dependency production
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # --- Stage 2: Runtime Environment ---
 FROM node:20-alpine AS runner

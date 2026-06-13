@@ -17,8 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          # Lưu ý: Tag này sẽ được Jenkins pipeline tự động cập nhật khi build
-          image: your-dockerhub-username/demo-backend:latest
+          image: thang05/demo-backend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 5000

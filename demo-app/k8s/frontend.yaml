@@ -17,8 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          # Lưu ý: Tag này sẽ được Jenkins pipeline tự động cập nhật khi build
-          image: your-dockerhub-username/demo-frontend:latest
+          image: thang05/demo-frontend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
