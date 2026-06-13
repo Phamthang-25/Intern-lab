@@ -1,18 +1,14 @@
 pipeline {
-    agent any
+    agent { label 'ec2-agent' }
 
     environment {
-        // Thay thế bằng thông tin tài khoản Docker Hub của bạn
-        DOCKER_REGISTRY      = 'your-dockerhub-username'
+        DOCKER_REGISTRY      = 'thang05'
         
-        // Tên các image
         IMAGE_BACKEND        = 'demo-backend'
         IMAGE_FRONTEND       = 'demo-frontend'
         
-        // Tạo tag bằng build ID và git commit ngắn
         IMAGE_TAG            = "build-${env.BUILD_NUMBER}"
         
-        // Credential IDs đã cấu hình trên Jenkins
         DOCKER_HUB_CREDS     = 'docker-hub-credentials-id'
         SONARQUBE_SERVER_ENV = 'sonarqube-server'
         GIT_CREDS            = 'git-credentials-id'
@@ -56,8 +52,6 @@ pipeline {
             steps {
                 script {
                     echo "Đang quét bảo mật Frontend Image..."
-                    // --exit-code 0 để pipeline không bị lỗi nếu phát hiện lỗ hổng (dành cho môi trường lab)
-                    // Nếu muốn chặn build khi có lỗi nghiêm trọng (Critical), sửa thành --exit-code 1 --severity CRITICAL
                     sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}"
                     
                     echo "Đang quét bảo mật Backend Image..."
@@ -68,7 +62,6 @@ pipeline {
 
         stage('Docker Push') {
             steps {
-                // Đăng nhập Docker Hub và Push Image lên registry
                 withCredentials([usernamePassword(credentialsId: "${env.DOCKER_HUB_CREDS}", passwordVariable: 'DOCKER_HUB_PASSWORD', usernameVariable: 'DOCKER_HUB_USERNAME')]) {
                     sh "echo \$DOCKER_HUB_PASSWORD | docker login -u \$DOCKER_HUB_USERNAME --password-stdin"
                     sh "docker push ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}"
@@ -85,6 +78,22 @@ pipeline {
                     sh """
                         sed -i 's|image: .*/${IMAGE_FRONTEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}|g' ./demo-app/k8s/frontend.yaml
                         sed -i 's|image: .*/${IMAGE_BACKEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}|g' ./demo-app/k8s/backend.yaml
+                    """
+                }
+            }
+        }
+
+        stage('Git Commit & Push') {
+            steps {
+                // Cấu hình Git Credentials để commit và push thay đổi tag ngược lại Git repo
+                withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDS}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                    sh """
+                        git add ./demo-app/k8s/frontend.yaml ./demo-app/k8s/backend.yaml
+                        git commit -m "chore(ci): update app image tags to ${IMAGE_TAG} [skip ci]" || true
+                        
+                        # Cấu hình remote URL chứa credentials để push không cần nhập password vào repo thực tế của bạn
+                        git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Phamthang-25/Intern-lab.git
+                        git push origin HEAD:main
                     """
                 }
             }

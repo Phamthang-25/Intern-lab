@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jenkins-ingress
+  namespace: jenkins
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    # Giới hạn kích thước upload (cần thiết khi upload file cấu hình lớn lên Jenkins)
+    nginx.ingress.kubernetes.io/proxy-body-size: "128m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: jenkins.devthangops.live
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jenkins
+                port:
+                  number: 8080
