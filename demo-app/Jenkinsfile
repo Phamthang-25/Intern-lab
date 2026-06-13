@@ -2,13 +2,14 @@ pipeline {
     agent { label 'ec2-agent' }
 
     environment {
+        // Tài khoản Docker Hub của bạn
         DOCKER_REGISTRY      = 'thang05'
         
+        // Tên các image
         IMAGE_BACKEND        = 'demo-backend'
         IMAGE_FRONTEND       = 'demo-frontend'
         
-        IMAGE_TAG            = "build-${env.BUILD_NUMBER}"
-        
+        // Credential IDs đã cấu hình trên Jenkins
         DOCKER_HUB_CREDS     = 'docker-hub-credentials-id'
         SONARQUBE_SERVER_ENV = 'sonarqube-server'
         GIT_CREDS            = 'git-credentials-id'
@@ -18,6 +19,16 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 checkout scm
+                script {
+                    // Lấy Git Tag chính xác của commit hiện tại, nếu không có thì fallback về build number
+                    try {
+                        env.IMAGE_TAG = sh(script: "git describe --tags --exact-match", returnStdout: true).trim()
+                        echo "===> PHÁT HIỆN GIT TAG: ${env.IMAGE_TAG}"
+                    } catch (Exception e) {
+                        env.IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+                        echo "===> KHÔNG PHÁT HIỆN GIT TAG, DÙNG FALLBACK: ${env.IMAGE_TAG}"
+                    }
+                }
             }
         }
 
@@ -39,11 +50,11 @@ pipeline {
         stage('Docker Build') {
             steps {
                 script {
-                    echo "Đang build Frontend Image..."
-                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG} ./demo-app/frontend"
+                    echo "Đang build Frontend Image với tag: ${env.IMAGE_TAG}..."
+                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${env.IMAGE_TAG} ./demo-app/frontend"
                     
-                    echo "Đang build Backend Image..."
-                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG} ./demo-app/backend"
+                    echo "Đang build Backend Image với tag: ${env.IMAGE_TAG}..."
+                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${env.IMAGE_TAG} ./demo-app/backend"
                 }
             }
         }
@@ -51,21 +62,24 @@ pipeline {
         stage('Security Scan (Trivy)') {
             steps {
                 script {
-                    echo "Đang quét bảo mật Frontend Image..."
-                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}"
+                    echo "Đang quét bảo mật Frontend Image và lưu báo cáo..."
+                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL --format table --output trivy-frontend-report.txt ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${env.IMAGE_TAG}"
+                    sh "cat trivy-frontend-report.txt"
                     
-                    echo "Đang quét bảo mật Backend Image..."
-                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}"
+                    echo "Đang quét bảo mật Backend Image và lưu báo cáo..."
+                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL --format table --output trivy-backend-report.txt ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${env.IMAGE_TAG}"
+                    sh "cat trivy-backend-report.txt"
                 }
             }
         }
 
         stage('Docker Push') {
             steps {
+                // Đăng nhập Docker Hub và Push Image lên registry
                 withCredentials([usernamePassword(credentialsId: "${env.DOCKER_HUB_CREDS}", passwordVariable: 'DOCKER_HUB_PASSWORD', usernameVariable: 'DOCKER_HUB_USERNAME')]) {
                     sh "echo \$DOCKER_HUB_PASSWORD | docker login -u \$DOCKER_HUB_USERNAME --password-stdin"
-                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}"
-                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${env.IMAGE_TAG}"
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${env.IMAGE_TAG}"
                 }
             }
         }
@@ -76,8 +90,8 @@ pipeline {
                     echo "Cập nhật tag image mới vào K8s Manifests..."
                     // Cập nhật tag mới cho file Deployment của Frontend và Backend
                     sh """
-                        sed -i 's|image: .*/${IMAGE_FRONTEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}|g' ./demo-app/k8s/frontend.yaml
-                        sed -i 's|image: .*/${IMAGE_BACKEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}|g' ./demo-app/k8s/backend.yaml
+                        sed -i 's|image: .*/${IMAGE_FRONTEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${env.IMAGE_TAG}|g' ./demo-app/k8s/frontend.yaml
+                        sed -i 's|image: .*/${IMAGE_BACKEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${env.IMAGE_TAG}|g' ./demo-app/k8s/backend.yaml
                     """
                 }
             }
@@ -88,10 +102,12 @@ pipeline {
                 // Cấu hình Git Credentials để commit và push thay đổi tag ngược lại Git repo
                 withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDS}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
                     sh """
+                        git config user.email "jenkins-ci@devthangops.live"
+                        git config user.name "Jenkins CI"
                         git add ./demo-app/k8s/frontend.yaml ./demo-app/k8s/backend.yaml
-                        git commit -m "chore(ci): update app image tags to ${IMAGE_TAG} [skip ci]" || true
+                        git commit -m "chore(ci): update app image tags to ${env.IMAGE_TAG} [skip ci]" || true
                         
-                        # Cấu hình remote URL chứa credentials để push không cần nhập password vào repo thực tế của bạn
+                        # Cấu hình remote URL chứa credentials để push không cần nhập password
                         git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Phamthang-25/Intern-lab.git
                         git push origin HEAD:main
                     """
@@ -102,10 +118,13 @@ pipeline {
 
     post {
         always {
+            // Lưu file báo cáo Trivy làm Artifact trên Jenkins UI để tải xuống
+            archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
+            
             // Dọn dẹp các image local trên agent sau khi hoàn thành để tránh đầy đĩa cứng
             sh """
-                docker rmi ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG} || true
-                docker rmi ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG} || true
+                docker rmi ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${env.IMAGE_TAG} || true
+                docker rmi ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${env.IMAGE_TAG} || true
             """
         }
         success {
