@@ -96,24 +96,6 @@ pipeline {
                 }
             }
         }
-
-        stage('Git Commit & Push') {
-            steps {
-                // Cấu hình Git Credentials để commit và push thay đổi tag ngược lại Git repo
-                withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDS}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
-                    sh """
-                        git config user.email "jenkins-ci@devthangops.live"
-                        git config user.name "Jenkins CI"
-                        git add ./demo-app/k8s/frontend.yaml ./demo-app/k8s/backend.yaml
-                        git commit -m "chore(ci): update app image tags to ${env.IMAGE_TAG} [skip ci]" || true
-                        
-                        # Cấu hình remote URL chứa credentials để push không cần nhập password
-                        git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Phamthang-25/Intern-lab.git
-                        git push origin HEAD:main
-                    """
-                }
-            }
-        }
     }
 
     post {
