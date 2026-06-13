@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # Trỏ thẳng về repository GitHub của bạn
+    repoURL: 'https://github.com/Phamthang-25/Intern-lab.git'
+    targetRevision: HEAD
+    path: demo-app/k8s
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: demo-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
