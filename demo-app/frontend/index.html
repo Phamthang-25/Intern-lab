@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevSecOps Dashboard | Demo App</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <div class="logo-area">
+        <div class="logo-icon"></div>
+        <h1>DevSecOps Portal</h1>
+      </div>
+      <div class="system-status">
+        <span class="indicator green"></span>
+        <span class="status-text">Frontend: Active</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- Row 1: Status Cards -->
+      <section class="status-grid">
+        <div class="card status-card">
+          <h3>Hệ thống K8s (RKE2)</h3>
+          <p class="value">Single-Node</p>
+          <div class="card-footer">
+            <span class="badge success">Running</span>
+          </div>
+        </div>
+        
+        <div class="card status-card">
+          <h3>Backend API Status</h3>
+          <p class="value" id="be-status">Kiểm tra...</p>
+          <div class="card-footer">
+            <span class="badge" id="be-badge">Pending</span>
+          </div>
+        </div>
+
+        <div class="card status-card">
+          <h3>Kết nối Database</h3>
+          <p class="value" id="db-status">Kiểm tra...</p>
+          <div class="card-footer">
+            <span class="badge" id="db-badge">Pending</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Row 2: DB Data & logs -->
+      <section class="data-section">
+        <div class="card table-card">
+          <div class="card-header">
+            <h2>Lịch sử truy cập hệ thống (Database logs)</h2>
+            <button class="btn btn-primary" id="refresh-btn">Tải lại dữ liệu</button>
+          </div>
+          
+          <div class="table-container">
+            <table id="logs-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Thời gian</th>
+                  <th>Nội dung sự kiện</th>
+                  <th>Nguồn IP</th>
+                </tr>
+              </thead>
+              <tbody id="logs-body">
+                <tr>
+                  <td colspan="4" class="text-center">Đang tải dữ liệu từ API...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>DevSecOps Demo App © 2026. Deploy tự động qua ArgoCD.</p>
+    </footer>
+  </div>
+
+  <script>
+    const beStatusEl = document.getElementById('be-status');
+    const beBadgeEl = document.getElementById('be-badge');
+    const dbStatusEl = document.getElementById('db-status');
+    const dbBadgeEl = document.getElementById('db-badge');
+    const logsBodyEl = document.getElementById('logs-body');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    async function fetchDashboardData() {
+      // Đổi trạng thái hiển thị loading
+      beStatusEl.textContent = 'Đang gọi API...';
+      beStatusEl.className = 'value warning-text';
+      
+      try {
+        // Sử dụng relative path để tận dụng Ingress Path-based routing
+        const response = await fetch('/api/data');
+        if (!response.ok) {
+          throw new Error(`HTTP Error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          // Cập nhật trạng thái BE và DB
+          beStatusEl.textContent = 'Hoạt động';
+          beStatusEl.className = 'value success-text';
+          beBadgeEl.textContent = 'Active';
+          beBadgeEl.className = 'badge success';
+          
+          dbStatusEl.textContent = 'Kết nối OK';
+          dbStatusEl.className = 'value success-text';
+          dbBadgeEl.textContent = `Host: ${data.db_host}`;
+          dbBadgeEl.className = 'badge success';
+
+          // Cập nhật bảng logs
+          logsBodyEl.innerHTML = '';
+          if (data.logs.length === 0) {
+            logsBodyEl.innerHTML = `<tr><td colspan="4" class="text-center">Không có bản ghi nào.</td></tr>`;
+          } else {
+            data.logs.forEach(log => {
+              const row = document.createElement('tr');
+              
+              // Format date
+              const localDate = new Date(log.event_time).toLocaleString('vi-VN');
+              
+              row.innerHTML = `
+                <td><strong>#${log.id}</strong></td>
+                <td>${localDate}</td>
+                <td>${escapeHTML(log.message)}</td>
+                <td><span class="ip-address">${escapeHTML(log.source_ip)}</span></td>
+              `;
+              logsBodyEl.appendChild(row);
+            });
+          }
+        } else {
+          showErrorState(data.error || 'Dữ liệu API không hợp lệ');
+        }
+      } catch (err) {
+        showErrorState(err.message);
+      }
+    }
+
+    function showErrorState(errorMsg) {
+      beStatusEl.textContent = 'Mất kết nối';
+      beStatusEl.className = 'value danger-text';
+      beBadgeEl.textContent = 'Offline';
+      beBadgeEl.className = 'badge danger';
+      
+      dbStatusEl.textContent = 'Lỗi DB';
+      dbStatusEl.className = 'value danger-text';
+      dbBadgeEl.textContent = 'Error';
+      dbBadgeEl.className = 'badge danger';
+
+      logsBodyEl.innerHTML = `
+        <tr>
+          <td colspan="4" class="text-center danger-text">
+            <strong>Không thể kết nối tới Backend API.</strong><br>
+            Chi tiết lỗi: ${escapeHTML(errorMsg)}
+          </td>
+        </tr>
+      `;
+    }
+
+    function escapeHTML(str) {
+      return str.replace(/[&<>'"]/g, 
+        tag => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          "'": '&#39;',
+          '"': '&quot;'
+        }[tag] || tag)
+      );
+    }
+
+    refreshBtn.addEventListener('click', fetchDashboardData);
+    
+    // Tự động load dữ liệu khi khởi chạy
+    window.addEventListener('DOMContentLoaded', fetchDashboardData);
+  </script>
+</body>
+</html>

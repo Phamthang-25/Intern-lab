@@ -1,0 +1,8 @@
+---
+# Master Playbook: Cài đặt và cấu hình cụm RKE2 chỉ bằng 1 lệnh duy nhất.
+
+- name: BƯỚC 1 - Bootstrap hệ điều hành (Ubuntu)
+  import_playbook: playbook-bootstrap.yml
+
+- name: BƯỚC 2 - Cài đặt và cấu hình cụm RKE2 Single-Node
+  import_playbook: playbook-rke2.yml

@@ -1,0 +1,136 @@
+---
+- name: Install and Configure RKE2 Single-Node (Ubuntu Optimized)
+  hosts: rke2_nodes
+  become: true
+  tasks:
+    - name: Get home directory of SSH user
+      shell: "echo $HOME"
+      register: ssh_user_home
+      changed_when: false
+      become: false
+    - name: Get username of SSH user
+      shell: "whoami"
+      register: ssh_username
+      changed_when: false
+      become: false
+
+
+    - name: Download RKE2 installation script
+      get_url:
+        url: https://get.rke2.io
+        dest: /tmp/install-rke2.sh
+        mode: '0755'
+
+    - name: Run RKE2 installation script (Server role)
+      command: /tmp/install-rke2.sh
+      environment:
+        INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+        INSTALL_RKE2_TYPE: "server"
+      register: rke2_install_output
+      changed_when: true
+
+    - name: Create RKE2 config directory
+      file:
+        path: "{{ rke2_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Write RKE2 config.yaml configuration
+      copy:
+        content: |
+          write-kubeconfig-mode: "0644"
+          tls-san:
+          {% for san in rke2_tls_sans %}
+            - "{{ san }}"
+          {% endfor %}
+          {% if disable_rke2_ingress_nginx %}
+          disable:
+            - rke2-ingress-nginx
+          {% endif %}
+        dest: "{{ rke2_config_dir }}/config.yaml"
+        mode: '0600'
+      register: rke2_config_write
+
+    - name: Start and enable rke2-server service
+      systemd:
+        name: rke2-server
+        state: started
+        enabled: yes
+      register: rke2_service_start
+
+    - name: Wait for Kubernetes API to be ready
+      wait_for:
+        host: 127.0.0.1
+        port: 6443
+        delay: 10
+        timeout: 300
+        state: started
+
+    - name: Ensure SSH user's ~/.kube directory exists
+      file:
+        path: "{{ ssh_user_home.stdout }}/.kube"
+        state: directory
+        owner: "{{ ssh_username.stdout }}"
+        group: "{{ ssh_username.stdout }}"
+        mode: '0700'
+
+    - name: Copy kubeconfig to user's home directory
+      copy:
+        src: /etc/rancher/rke2/rke2.yaml
+        dest: "{{ ssh_user_home.stdout }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ssh_username.stdout }}"
+        group: "{{ ssh_username.stdout }}"
+        mode: '0600'
+
+    - name: Update server address in user's kubeconfig to use Public IP/Domain
+      replace:
+        path: "{{ ssh_user_home.stdout }}/.kube/config"
+        regexp: 'server: https://127.0.0.1:6443'
+        replace: "server: https://{{ elastic_ip }}:6443"
+      when: elastic_ip != 'your-elastic-ip-here'
+
+    - name: Create symlinks for kubectl, crictl, and ctr
+      file:
+        src: "{{ rke2_data_dir }}/bin/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        state: link
+      loop:
+        - kubectl
+        - crictl
+        - ctr
+
+    - name: Add RKE2 binary path to system profile for bash
+      copy:
+        content: 'export PATH=$PATH:/var/lib/rancher/rke2/bin'
+        dest: /etc/profile.d/rke2.sh
+        mode: '0644'
+
+    - name: Check if Helm is already installed
+      command: helm version
+      register: helm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install Helm 3 (if not present)
+      shell: curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      when: helm_check.rc != 0
+      changed_when: true
+
+    - name: Fetch Kubeconfig back to local controller machine (Optional)
+      fetch:
+        src: "{{ ssh_user_home.stdout }}/.kube/config"
+        dest: "./kubeconfig-rke2"
+        flat: yes
+      ignore_errors: true
+
+    - name: Print Instructions
+      debug:
+        msg:
+          - "=========================================================="
+          - " CÀI ĐẶT RKE2 HOÀN TẤT!"
+          - "=========================================================="
+          - " - Trạng thái node: Hãy chạy 'kubectl get nodes -o wide'"
+          - " - File kubeconfig đã được sao chép về máy local của bạn tại: ./kubeconfig-rke2"
+          - "   Bạn có thể dùng: 'export KUBECONFIG=./kubeconfig-rke2' để thao tác từ máy local."
+          - "=========================================================="

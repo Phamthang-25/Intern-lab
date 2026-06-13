@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+
+    environment {
+        // Thay thế bằng thông tin tài khoản Docker Hub của bạn
+        DOCKER_REGISTRY      = 'your-dockerhub-username'
+        
+        // Tên các image
+        IMAGE_BACKEND        = 'demo-backend'
+        IMAGE_FRONTEND       = 'demo-frontend'
+        
+        // Tạo tag bằng build ID và git commit ngắn
+        IMAGE_TAG            = "build-${env.BUILD_NUMBER}"
+        
+        // Credential IDs đã cấu hình trên Jenkins
+        DOCKER_HUB_CREDS     = 'docker-hub-credentials-id'
+        SONARQUBE_SERVER_ENV = 'sonarqube-server'
+        GIT_CREDS            = 'git-credentials-id'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Static Code Analysis (SonarQube)') {
+            steps {
+                withSonarQubeEnv("${env.SONARQUBE_SERVER_ENV}") {
+                    sh """
+                        # Chạy sonar-scanner quét mã nguồn
+                        sonar-scanner \
+                          -Dsonar.projectKey=demo-app \
+                          -Dsonar.projectName=demo-app \
+                          -Dsonar.sources=demo-app/backend,demo-app/frontend \
+                          -Dsonar.exclusions=**/node_modules/**,**/styles.css
+                    """
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    echo "Đang build Frontend Image..."
+                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG} ./demo-app/frontend"
+                    
+                    echo "Đang build Backend Image..."
+                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG} ./demo-app/backend"
+                }
+            }
+        }
+
+        stage('Security Scan (Trivy)') {
+            steps {
+                script {
+                    echo "Đang quét bảo mật Frontend Image..."
+                    // --exit-code 0 để pipeline không bị lỗi nếu phát hiện lỗ hổng (dành cho môi trường lab)
+                    // Nếu muốn chặn build khi có lỗi nghiêm trọng (Critical), sửa thành --exit-code 1 --severity CRITICAL
+                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}"
+                    
+                    echo "Đang quét bảo mật Backend Image..."
+                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                // Đăng nhập Docker Hub và Push Image lên registry
+                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_HUB_CREDS}", passwordVariable: 'DOCKER_HUB_PASSWORD', usernameVariable: 'DOCKER_HUB_USERNAME')]) {
+                    sh "echo \$DOCKER_HUB_PASSWORD | docker login -u \$DOCKER_HUB_USERNAME --password-stdin"
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Update Manifests Tag') {
+            steps {
+                script {
+                    echo "Cập nhật tag image mới vào K8s Manifests..."
+                    // Cập nhật tag mới cho file Deployment của Frontend và Backend
+                    sh """
+                        sed -i 's|image: .*/${IMAGE_FRONTEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG}|g' ./demo-app/k8s/frontend.yaml
+                        sed -i 's|image: .*/${IMAGE_BACKEND}:.*|image: ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG}|g' ./demo-app/k8s/backend.yaml
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Dọn dẹp các image local trên agent sau khi hoàn thành để tránh đầy đĩa cứng
+            sh """
+                docker rmi ${DOCKER_REGISTRY}/${IMAGE_FRONTEND}:${IMAGE_TAG} || true
+                docker rmi ${DOCKER_REGISTRY}/${IMAGE_BACKEND}:${IMAGE_TAG} || true
+            """
+        }
+        success {
+            echo "Pipeline chạy thành công! ArgoCD sẽ tự động đồng bộ (Auto-sync) image mới lên Cluster."
+        }
+        failure {
+            echo "Pipeline thất bại! Vui lòng kiểm tra console logs."
+        }
+    }
+}

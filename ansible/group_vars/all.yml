@@ -1,0 +1,23 @@
+---
+# Phiên bản RKE2 muốn cài đặt.
+rke2_version: "v1.28.11+rke2r1"
+
+# Đường dẫn cài đặt và cấu hình RKE2
+rke2_config_dir: "/etc/rancher/rke2"
+rke2_data_dir: "/var/lib/rancher/rke2"
+
+# Dùng để tự động cấu hình TLS-SAN cho API Server.
+domain_name: "yourdomain.com"
+
+# Elastic IP của EC2. Dùng để API Server nhận dạng kết nối từ bên ngoài.
+elastic_ip: "18.206.178.71"
+
+# Cấu hình file config.yaml cho RKE2
+disable_rke2_ingress_nginx: true
+
+# TLS SANs: Danh sách IP và Domain được phép gọi tới Kubernetes API.
+rke2_tls_sans:
+  - "127.0.0.1"
+  - "{{ elastic_ip }}"
+  # - "{{ domain_name }}"
+  # - "*.{{ domain_name }}"
