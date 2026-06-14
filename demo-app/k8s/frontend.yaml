@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: thang05/demo-frontend:latest
+          image: thang05/demo-frontend:v1.1
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
