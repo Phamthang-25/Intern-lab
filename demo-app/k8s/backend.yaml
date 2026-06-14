@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: thang05/demo-backend:latest
+          image: thang05/demo-backend:v1.1
           imagePullPolicy: Always
           ports:
             - containerPort: 5000
